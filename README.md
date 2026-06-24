@@ -5,7 +5,7 @@ real cohort, and watch the model improve as confirmed outcomes accumulate. The
 classifier is **written from scratch** — gradient descent + binary cross-entropy, no
 ML libraries — the same optimization that underlies neural-network and LLM training.
 
-**Live demo:** _add your GitHub Pages URL here_
+**Live demo:** https://nkot57.github.io/diabetes-risk-screening/
 
 ---
 
