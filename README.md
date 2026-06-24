@@ -103,7 +103,6 @@ Commit `weights.json` to publish the updated model to every visitor.
 | `supabase-schema.sql` | Database table + insert-only security + validation |
 | `SETUP.md` | Database setup walkthrough |
 | `Diabetes Classification 2.csv` | The reference cohort |
-| `COMBINED.py` | The original statistical prototype |
 
 ---
 
