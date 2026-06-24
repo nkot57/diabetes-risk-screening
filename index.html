@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en" data-mode="light">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Diabetes Risk Screening</title>
+<meta name="description" content="Estimate your Type-2 diabetes risk from routine blood-work and see where you fall among people with confirmed outcomes." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  :root{
+    --bg:#fbfbfa; --surface:#ffffff; --surface-2:#f4f4f2; --border:#e6e6e1;
+    --text:#16181d; --muted:#6b7177;
+    --accent:#16324f; --accent-ink:#ffffff;
+    --c-diabetic:#d23950; --c-nondiabetic:#2f74d0; --pending:#c77d11;
+    --radius:9px; --maxw:1140px;
+    --sans:"IBM Plex Sans",system-ui,sans-serif; --mono:"IBM Plex Mono",monospace;
+    --shadow:0 1px 2px rgba(20,24,32,.05);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--bg); color:var(--text); font-family:var(--sans); font-size:15px; line-height:1.55; -webkit-font-smoothing:antialiased}
+  .wrap{max-width:var(--maxw); margin:0 auto; padding:0 26px}
+  h1,h2,h3{margin:0; font-weight:600; letter-spacing:-.012em}
+  .mono{font-family:var(--mono); font-variant-numeric:tabular-nums}
+  button{font-family:var(--sans)}
+
+  header{position:sticky; top:0; z-index:20; background:color-mix(in srgb,var(--bg) 90%,transparent);
+    backdrop-filter:saturate(1.1) blur(8px); border-bottom:1px solid var(--border)}
+  .bar{display:flex; align-items:center; gap:11px; height:60px}
+  .mark{width:26px;height:26px;flex:none}
+  .brand h1{font-size:15px; line-height:1.1}
+  .brand small{color:var(--muted); font-size:11.5px}
+  .spacer{flex:1}
+  .status{display:flex; align-items:center; gap:7px; font-size:12px; color:var(--muted)}
+  .dot{width:8px;height:8px;border-radius:50%; background:var(--pending); transition:background .3s}
+  .dot.ready{background:#2f9e6f}
+
+  .hero{padding:26px 0 4px}
+  .hero .eyebrow{font-family:var(--mono); font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--accent)}
+  .hero h2{font-size:24px; margin:8px 0 7px}
+  .hero p{color:var(--muted); max-width:75ch; margin:0; font-size:14.5px}
+
+  main{padding:22px 0 50px}
+  .grid{display:grid; grid-template-columns:380px 1fr; gap:18px; align-items:start}
+  @media(max-width:920px){ .grid{grid-template-columns:1fr} }
+
+  .card{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow)}
+  .hd{padding:15px 17px 0}
+  .hd h3{font-size:13.5px; display:flex; align-items:center; gap:8px}
+  .hd .sub{color:var(--muted); font-size:12.5px; margin-top:3px}
+  .bd{padding:15px 17px 17px}
+
+  .drop{border:1.5px dashed var(--border); border-radius:7px; padding:11px 13px; display:flex; align-items:center; gap:9px;
+    cursor:pointer; transition:.15s; color:var(--muted); font-size:12.5px; margin-bottom:6px}
+  .drop.drag{border-color:var(--accent); background:color-mix(in srgb,var(--accent) 6%,var(--surface)); color:var(--text)}
+  .upnote{font-size:11.5px; color:var(--muted); min-height:16px; margin-bottom:10px}
+  .upnote .warn{color:var(--pending)}
+  .orline{display:flex; align-items:center; gap:10px; color:var(--muted); font-size:10.5px; font-family:var(--mono); letter-spacing:.1em; margin:8px 0}
+  .orline::before,.orline::after{content:""; height:1px; background:var(--border); flex:1}
+
+  .twocol{display:grid; grid-template-columns:1fr 1fr; gap:9px}
+  .field{margin-bottom:10px}
+  .field label{display:flex; justify-content:space-between; align-items:baseline; font-size:12px; font-weight:600; margin-bottom:5px}
+  .field label span{color:var(--muted); font-weight:400; font-family:var(--mono); font-size:10px}
+  .field input{width:100%; padding:9px 11px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--text);
+    font:inherit; font-size:14px; font-variant-numeric:tabular-nums}
+  .field input:hover{border-color:var(--muted)}
+  .field input:focus{outline:2px solid var(--accent); outline-offset:1px}
+
+  .btn{font-size:13px; font-weight:500; border:1px solid var(--border); background:var(--surface); color:var(--text);
+    padding:9px 13px; border-radius:7px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:7px; transition:.15s}
+  .btn:hover{border-color:var(--muted)}
+  .btn.primary{background:var(--accent); color:var(--accent-ink); border-color:var(--accent); font-weight:600}
+  .btn.primary:hover{filter:brightness(1.14)}
+  .btn.sm{padding:6px 10px; font-size:12px}
+  .btn.dia{border-color:color-mix(in srgb,var(--c-diabetic) 45%,var(--border)); color:var(--c-diabetic)}
+  .btn.dia:hover{background:color-mix(in srgb,var(--c-diabetic) 8%,var(--surface))}
+  .btn.non{border-color:color-mix(in srgb,var(--c-nondiabetic) 45%,var(--border)); color:var(--c-nondiabetic)}
+  .btn.non:hover{background:color-mix(in srgb,var(--c-nondiabetic) 8%,var(--surface))}
+  .actions{display:flex; gap:8px; margin-top:3px}
+  .actions .btn{flex:1}
+
+  .readout{margin-top:14px; border-top:1px solid var(--border); padding-top:13px}
+  .band-tag{font-family:var(--mono); font-size:11px; padding:4px 8px; border-radius:6px; border:1px solid var(--border); display:inline-block; margin-bottom:6px}
+  .score{font-size:44px; font-weight:600; line-height:.9; letter-spacing:-.02em; font-variant-numeric:tabular-nums}
+  .score small{font-size:16px; color:var(--muted); font-weight:500}
+  .meter{height:7px; border-radius:5px; margin-top:12px; background:var(--surface-2); overflow:hidden}
+  .meter > i{display:block; height:100%; border-radius:5px; background:var(--accent); width:0; transition:width .55s cubic-bezier(.2,.7,.2,1)}
+  .verdict{margin-top:11px; font-size:13px; color:var(--muted)} .verdict b{color:var(--text)}
+  .empty-note{color:var(--muted); font-size:13px}
+
+  .confirm{margin-top:14px; border-top:1px solid var(--border); padding-top:12px}
+  .confirm .lab{font-size:11px; font-family:var(--mono); letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin-bottom:8px}
+  .tinynote{font-size:11.5px; color:var(--muted); margin-top:9px; line-height:1.5}
+
+  .legend{display:flex; gap:14px; flex-wrap:wrap; font-size:12px; color:var(--muted); margin-bottom:4px}
+  .legend i{display:inline-block; width:10px;height:10px; border-radius:2px; margin-right:5px; vertical-align:-1px}
+  .chartbox{position:relative; height:360px; padding-top:4px}
+  .cap{font-size:12px; color:var(--muted); margin-top:10px; line-height:1.55}
+
+  footer{border-top:1px solid var(--border); padding:22px 0 46px; color:var(--muted); font-size:12px; margin-top:24px}
+  footer b{color:var(--text)} footer .warn b{color:var(--c-diabetic)}
+
+  .toast{position:fixed; bottom:22px; left:50%; transform:translateX(-50%) translateY(20px); background:var(--text); color:var(--bg);
+    padding:11px 18px; border-radius:8px; font-size:13px; opacity:0; pointer-events:none; transition:.3s; z-index:60; box-shadow:0 8px 30px rgba(0,0,0,.2)}
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap bar">
+    <svg class="mark" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+      <rect x="1.5" y="1.5" width="37" height="37" rx="9" stroke="var(--accent)" stroke-width="1.5" opacity=".35"/>
+      <path d="M5 20 H13 L16 11 L21 29 L25 20 H35" stroke="var(--accent)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <div class="brand"><h1>Diabetes Risk Screening</h1><small>Type-2 · blood-work based</small></div>
+    <div class="spacer"></div>
+    <div class="status"><span class="dot" id="statusDot"></span><span id="statusText">Calibrating…</span></div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="hero">
+    <div class="eyebrow">Screening aid</div>
+    <h2>See your estimated risk — and where you stand.</h2>
+    <p>Enter or upload your routine blood-work. We estimate your Type-2 diabetes risk and show where you fall among people whose outcome is already confirmed. If you later learn your real result, you can confirm it — and it quietly improves the model for everyone.</p>
+  </div>
+
+  <div class="grid">
+    <!-- ============ INPUT ============ -->
+    <section class="card">
+      <div class="hd"><h3>Your blood-work</h3><div class="sub">Upload a report, or type the values you have. Anything you leave blank is assumed average.</div></div>
+      <div class="bd">
+        <label class="drop" id="updrop">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
+          <span>Upload a blood-test <b>PDF</b> or <b>CSV</b> — we fill the fields for you to confirm</span>
+          <input id="upfile" type="file" accept=".pdf,.csv,application/pdf,text/csv" hidden />
+        </label>
+        <div class="upnote" id="upnote"></div>
+        <div class="orline">or enter manually</div>
+        <div class="twocol" id="inputs"></div>
+        <div class="actions">
+          <button class="btn primary" id="screenBtn" disabled>See my risk</button>
+          <button class="btn" id="exampleBtn" disabled>Example</button>
+        </div>
+
+        <div class="readout" id="readout" hidden>
+          <span class="band-tag mono" id="bandTag">Band —</span>
+          <div class="score mono" id="scoreNum">0<small>%</small></div>
+          <div class="meter"><i id="meterFill"></i></div>
+          <p class="verdict" id="verdict"></p>
+
+          <div class="confirm" id="confirmBox">
+            <div class="lab">Already know your result? Confirm it</div>
+            <div class="actions">
+              <button class="btn sm non" id="confNon">I'm non-diabetic</button>
+              <button class="btn sm dia" id="confDia">I'm diabetic</button>
+            </div>
+            <div class="tinynote">By confirming, you agree this <b>anonymous</b> result (blood-work values only — no name, no identifiers) may be stored and used to improve the model. It's saved on this device, and — if the database is enabled — added to a private research store.</div>
+          </div>
+        </div>
+        <p class="empty-note" id="emptyNote">Fill in or upload your results, then press <b>See my risk</b>.</p>
+      </div>
+    </section>
+
+    <!-- ============ DISTRIBUTION ============ -->
+    <section class="card">
+      <div class="hd"><h3>Where you sit</h3><div class="sub">Everyone with a confirmed outcome, placed by their estimated risk. Your score drops in as the marker.</div></div>
+      <div class="bd">
+        <div class="legend">
+          <span><i style="background:var(--c-nondiabetic)"></i>Non-diabetic</span>
+          <span><i style="background:var(--c-diabetic)"></i>Diabetic</span>
+          <span><i style="background:var(--accent)"></i>You</span>
+        </div>
+        <div class="chartbox"><canvas id="histChart"></canvas></div>
+        <p class="cap" id="cap">The dashed lines split risk into bands. The figure above each band is the share of people in that band who turned out to be diabetic — the honest probability for that range.</p>
+      </div>
+    </section>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p class="warn"><b>Important.</b> This is a screening aid and a personal-project demonstration — <b>not a medical device.</b> It does not diagnose anyone and does not replace assessment by a qualified clinician.</p>
+    <p>Behind the scenes this runs a logistic-regression model trained by gradient descent on a public blood-work dataset; confirmed results fine-tune it further. The model, its training, and its limitations are written up in the project README and report. Everything runs locally in your browser.</p>
+  </div>
+</footer>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+/* =====================================================================
+   User-facing screening dashboard.
+   The model — a logistic-regression classifier trained from scratch with
+   gradient descent + binary cross-entropy — runs behind the scenes. The
+   training mechanics live in the README / report, not in this UI.
+   ===================================================================== */
+const $=id=>document.getElementById(id);
+function toast(m){const t=$('toast');t.textContent=m;t.classList.add('show');clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.remove('show'),2400);}
+const sigmoid=z=>1/(1+Math.exp(-Math.max(-30,Math.min(30,z))));
+const mean=a=>a.reduce((x,y)=>x+y,0)/a.length;
+
+/* nicely-labelled markers; the model uses whatever numeric columns the data has */
+const LABELS={Age:["Age","yr"],BMI:["BMI","kg/m²"],Glucose:["Fasting glucose","mmol/L"],
+  Chol:["Total cholesterol","mmol/L"],TG:["Triglycerides","mmol/L"],HDL:["HDL","mmol/L"],
+  LDL:["LDL","mmol/L"],Cr:["Creatinine","µmol/L"],BUN:["Urea","mmol/L"]};
+const labelOf=k=>LABELS[k]?LABELS[k][0]:k;
+const unitOf =k=>LABELS[k]?LABELS[k][1]:"";
+
+/* =====================================================================
+   PERSISTENCE & DATABASE  (see SETUP.md)
+   --------------------------------------------------------------------
+   • Leave both blank → runs purely locally: confirmations persist in THIS
+     browser via localStorage (survive refresh, never uploaded).
+   • Fill them in → each confirmation is ALSO sent to your private Supabase
+     table. You periodically retrain (retrain.js) and publish weights.json,
+     which every visitor then loads as the curated model.
+   The anon key is INSERT-ONLY by design (supabase-schema.sql): the browser
+   can add a row but cannot read anyone else's data.
+   ===================================================================== */
+const SUPABASE_URL='https://pukpbbocdqucgzspvsrb.supabase.co';        // e.g. "https://abcd1234.supabase.co"
+const SUPABASE_ANON_KEY='sb_publishable_tWqRYEHuI7OWd-meNo4ShQ_FhgRRp7_';   // your project's public anon key
+
+const LS_KEY='diabetesnet_confirmations_v1';
+function lsLoad(){ try{return JSON.parse(localStorage.getItem(LS_KEY)||'[]');}catch(e){return [];} }
+function lsSave(a){ try{localStorage.setItem(LS_KEY,JSON.stringify(a));}catch(e){} }
+function lsAppend(rawRow,label){ const a=lsLoad(); a.push({v:rawRow,y:label,t:Date.now()}); lsSave(a); }
+/* fire-and-forget insert; failures are silent because the local copy is already saved */
+async function sendToDB(rawRow,label){
+  if(!SUPABASE_URL||!SUPABASE_ANON_KEY) return;
+  const rec={diagnosis:label}; DATA.featureNames.forEach((f,j)=>{ rec[f.toLowerCase()]=rawRow[j]; });
+   const headers={'Content-Type':'application/json','apikey':SUPABASE_ANON_KEY,'Prefer':'return=minimal'};
+  // legacy anon keys are JWTs (eyJ…) and also go in Authorization; new sb_publishable_ keys use apikey only
+  if(SUPABASE_ANON_KEY.startsWith('eyJ')) headers['Authorization']='Bearer '+SUPABASE_ANON_KEY;
+  try{ await fetch(SUPABASE_URL+'/rest/v1/submissions',{method:'POST',headers,body:JSON.stringify(rec)}); }
+  catch(e){/* offline/blocked — local copy already persisted */}
+}
+let PUBLISHED=null;   // owner-curated model from weights.json, if present
+
+/* ---------- model: logistic regression ---------- */
+let DATA=null, net=null, userScore=null, MODEL=null;
+function buildNet(){const D=DATA.featureNames.length; net={D, W:new Array(D).fill(0), b:0};}
+function pred(x){let z=net.b; for(let j=0;j<net.D;j++) z+=net.W[j]*x[j]; return sigmoid(z);}
+function trainStep(X,y,lr,l2){
+  const N=X.length,D=net.D, gW=new Array(D).fill(0); let gb=0;
+  for(let i=0;i<N;i++){const p=pred(X[i]), d=p-y[i]; for(let j=0;j<D;j++) gW[j]+=d*X[i][j]; gb+=d;}
+  for(let j=0;j<D;j++) net.W[j]-=lr*(gW[j]/N + l2*net.W[j]);
+  net.b-=lr*(gb/N);
+}
+function trainModel(epochs){buildNet(); for(let e=0;e<(epochs||320);e++) trainStep(DATA.X,DATA.y,0.5,0.0005);}
+
+/* Wilson 95% interval for k/n, as percentages */
+function wilson(k,n){if(!n)return null;const z=1.96,p=k/n,d=1+z*z/n;
+  const c=(p+z*z/(2*n))/d,h=z*Math.sqrt(p*(1-p)/n+z*z/(4*n*n))/d;return[Math.max(0,(c-h)*100),Math.min(100,(c+h)*100)];}
+
+const BANDS=[[0,20],[20,40],[40,60],[60,80],[80,101]];
+const BAND_LABELS=["0–20","20–40","40–60","60–80","80–100"];
+const bandOf=s=>s<20?"0–20":s<40?"20–40":s<60?"40–60":s<80?"60–80":"80–100";
+
+/* score the whole cohort and summarise bands + histogram bins */
+function recomputeModel(){
+  const scores=DATA.X.map(x=>100*pred(x));
+  const bins=20, binN=new Array(bins).fill(0), binD=new Array(bins).fill(0); // 5-wide bins, 0..100
+  scores.forEach((s,i)=>{let b=Math.min(bins-1,Math.floor(s/5)); (DATA.y[i]===1?binD:binN)[b]++;});
+  const bands=BANDS.map(([lo,hi],i)=>{
+    let tot=0,dia=0;
+    for(let k=0;k<scores.length;k++) if(scores[k]>=lo&&scores[k]<hi){tot++; if(DATA.y[k]===1)dia++;}
+    return {label:BAND_LABELS[i],lo,hi,total:tot,diabetic:dia,prev:tot?100*dia/tot:null,ci:wilson(dia,tot)};
+  });
+  MODEL={scores,binN,binD,bands};
+}
+function percentileOf(score){let below=0;for(const s of MODEL.scores) if(s<score) below++; return 100*below/MODEL.scores.length;}
+
+/* =====================================================================
+   DATA INGEST  (the reference cohort)
+   ===================================================================== */
+function numericCols(rows,fields){
+  return fields.filter(f=>{ if(!f||f==='Diagnosis')return false; let ok=0,tot=0;
+    for(const r of rows.slice(0,200)){if(r[f]===''||r[f]==null)continue; tot++; if(Number.isFinite(Number(r[f])))ok++;}
+    return tot>0 && ok/tot>0.9; });
+}
+function loadCohort(text){
+  const parsed=Papa.parse(text,{header:true,skipEmptyLines:true});
+  const fields=parsed.meta.fields||[];
+  if(!fields.includes('Diagnosis')){setStatus(false,'CSV needs a Diagnosis column');return false;}
+  const features=numericCols(parsed.data,fields);
+  if(features.length<2){setStatus(false,'Need numeric markers');return false;}
+  const X=[],y=[],raw=[];
+  for(const r of parsed.data){const d=Number(r.Diagnosis); if(d!==0&&d!==1)continue;
+    const row=new Array(features.length); let ok=true;
+    for(let j=0;j<features.length;j++){const v=Number(r[features[j]]); if(!Number.isFinite(v)){ok=false;break;} row[j]=v;}
+    if(ok){raw.push(row); y.push(d);}}
+  if(raw.length<40){setStatus(false,'Too few rows');return false;}
+  const D=features.length, mu=new Array(D).fill(0), sd=new Array(D).fill(0);
+  for(const r of raw) for(let j=0;j<D;j++) mu[j]+=r[j];
+  for(let j=0;j<D;j++) mu[j]/=raw.length;
+  for(const r of raw) for(let j=0;j<D;j++){const dd=r[j]-mu[j]; sd[j]+=dd*dd;}
+  for(let j=0;j<D;j++) sd[j]=Math.sqrt(sd[j]/raw.length)||1;
+  // a published, owner-curated model (weights.json) supplies the standardization it was trained with
+  let useMu=mu, useSd=sd;
+  const published = PUBLISHED && Array.isArray(PUBLISHED.features) && PUBLISHED.features.join()===features.join();
+  if(published){ useMu=PUBLISHED.mean; useSd=PUBLISHED.std; }
+  DATA={featureNames:features, mean:useMu, std:useSd, raw, y, X:raw.map(r=>r.map((v,j)=>(v-useMu[j])/useSd[j]))};
+
+  // restore THIS browser's own past confirmations so a refresh keeps them
+  const saved=lsLoad();
+  saved.forEach(s=>{ if(Array.isArray(s.v)&&s.v.length===features.length){
+    DATA.raw.push(s.v.slice()); DATA.y.push(s.y); DATA.X.push(s.v.map((val,j)=>(val-useMu[j])/useSd[j])); }});
+
+  if(published && Array.isArray(PUBLISHED.W) && PUBLISHED.W.length===features.length){
+    net={D:features.length, W:PUBLISHED.W.slice(), b:PUBLISHED.b};              // use the curated weights as-is
+    if(saved.length) for(let s=0;s<60;s++) trainStep(DATA.X,DATA.y,0.3,0.0005); // fold in local-only confirmations
+  } else {
+    trainModel();
+  }
+  recomputeModel(); renderInputs(); buildChart();
+  ['screenBtn','exampleBtn'].forEach(id=>$(id).disabled=false);
+  setStatus(true,`Model ready · ${DATA.X.length.toLocaleString()} people · ${published?'curated model':'trained locally'}`);
+  return true;
+}
+function setStatus(ready,text){$('statusText').textContent=text; $('statusDot').classList.toggle('ready',!!ready);}
+
+/* =====================================================================
+   INPUT FORM  (the individual)
+   ===================================================================== */
+function renderInputs(){
+  $('inputs').innerHTML=DATA.featureNames.map((f,j)=>
+    `<div class="field"><label>${labelOf(f)} <span>${unitOf(f)}</span></label>`+
+    `<input id="f_${j}" type="number" inputmode="decimal" placeholder="${DATA.mean[j].toFixed(1)}"></div>`).join('');
+}
+/* read the form -> standardized vector; blanks are MEAN-IMPUTED (z=0 = average) */
+function readForm(){
+  const x=new Array(DATA.featureNames.length); const missing=[]; let n=0;
+  for(let j=0;j<DATA.featureNames.length;j++){const v=parseFloat($('f_'+j).value);
+    if(Number.isFinite(v)){x[j]=(v-DATA.mean[j])/DATA.std[j]; n++;} else {x[j]=0; missing.push(labelOf(DATA.featureNames[j]));}}
+  return n===0?null:{x,missing};
+}
+let lastVec=null;
+function screen(){
+  const res=readForm(); if(!res){toast('Enter at least one value, or upload a report.');return;}
+  lastVec=res.x; userScore=100*pred(res.x);
+  const band=bandOf(userScore), b=MODEL.bands.find(x=>x.label===band), pct=percentileOf(userScore);
+  $('emptyNote').hidden=true; $('readout').hidden=false;
+  $('bandTag').textContent='Band '+band;
+  animateScore($('scoreNum'),userScore);
+  $('meterFill').style.width=Math.max(2,Math.min(100,userScore))+'%';
+  const miss=res.missing.length?` <span style="color:var(--pending)">(${res.missing.length} marker${res.missing.length>1?'s':''} missing — assumed average, lower confidence)</span>`:'';
+  const bandTxt=(b&&b.prev!=null)?`Among <b>${b.total}</b> confirmed people in band ${band}, <b>${b.diabetic}</b> were diabetic — a prevalence of <b>${b.prev.toFixed(1)}%</b>${b.ci?` <span style="color:var(--muted)">(95% CI ${b.ci[0].toFixed(0)}–${b.ci[1].toFixed(0)}%)</span>`:''}.`:`No confirmed people fall in band ${band} yet.`;
+  $('verdict').innerHTML=`Your estimated risk is <b>${userScore.toFixed(1)}%</b> — higher than <b>${pct.toFixed(0)}%</b> of the cohort.${miss}<br>${bandTxt}`;
+  buildChart();
+}
+function animateScore(el,target){const reduce=matchMedia('(prefers-reduced-motion:reduce)').matches,t0=performance.now(),dur=reduce?0:550;
+  (function step(t){const k=dur?Math.min(1,(t-t0)/dur):1,e=1-Math.pow(1-k,3); el.innerHTML=(target*e).toFixed(1)+'<small>%</small>'; if(k<1)requestAnimationFrame(step);})(performance.now());}
+
+$('screenBtn').onclick=screen;
+$('exampleBtn').onclick=()=>{const i=Math.floor(Math.random()*DATA.raw.length);
+  DATA.featureNames.forEach((f,j)=>$('f_'+j).value=DATA.raw[i][j]); $('upnote').textContent=''; screen();};
+
+/* ---------- confirm outcome -> fine-tune ---------- */
+function confirmOutcome(dx){
+  if(!lastVec){toast('See your risk first.');return;}
+  const rawRow=lastVec.map((v,j)=>v*DATA.std[j]+DATA.mean[j]);
+  DATA.X.push(lastVec.slice()); DATA.y.push(dx); DATA.raw.push(rawRow);
+  lsAppend(rawRow,dx);   // persists across refresh (this browser)
+  sendToDB(rawRow,dx);   // private database, if configured
+  for(let s=0;s<40;s++) trainStep(DATA.X,DATA.y,0.4,0.0005);   // online fine-tuning
+  recomputeModel();
+  userScore=100*pred(lastVec);
+  $('bandTag').textContent='Band '+bandOf(userScore);
+  animateScore($('scoreNum'),userScore);
+  $('meterFill').style.width=Math.max(2,Math.min(100,userScore))+'%';
+  $('verdict').innerHTML=`Thanks — recorded as <b style="color:${dx?'var(--c-diabetic)':'var(--c-nondiabetic)'}">${dx?'diabetic':'non-diabetic'}</b> and folded into the model. It retrained on <b>${DATA.X.length.toLocaleString()}</b> people; your re-scored risk is <b>${userScore.toFixed(1)}%</b>.`;
+  setStatus(true,`Model ready · ${DATA.X.length.toLocaleString()} people`);
+  buildChart();
+  toast(SUPABASE_URL?'Result saved & sent — model fine-tuned.':'Result saved on this device — model fine-tuned.');
+}
+$('confNon').onclick=()=>confirmOutcome(0);
+$('confDia').onclick=()=>confirmOutcome(1);
+
+/* =====================================================================
+   UPLOAD  (PDF or CSV of the individual's own results)
+   ===================================================================== */
+if(window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const PDF_SYN={Age:[/\bage\b/i],BMI:[/body mass index/i,/\bbmi\b/i],Glucose:[/fasting glucose/i,/\bglucose\b/i],
+  Chol:[/total cholesterol/i,/\bcholesterol\b/i,/\bchol\b/i],TG:[/triglycerides?/i,/\btrig\b/i,/\btg\b/i],
+  HDL:[/hdl/i],LDL:[/ldl/i],Cr:[/creatinine/i,/\bcreat\b/i,/\bcr\b/i],BUN:[/blood urea nitrogen/i,/\burea\b/i,/\bbun\b/i]};
+function fillFound(found){
+  DATA.featureNames.forEach((f,j)=>{ if(found[f]!=null) $('f_'+j).value=found[f]; });
+  const keys=Object.keys(found);
+  if(!keys.length){$('upnote').innerHTML='<span class="warn">No recognizable markers found — enter values manually.</span>';return;}
+  const miss=DATA.featureNames.filter(f=>found[f]==null).map(labelOf);
+  $('upnote').innerHTML=`Found <b style="color:var(--text)">${keys.length}</b>: ${keys.map(k=>labelOf(k)+' '+found[k]).join(', ')}.`+
+    (miss.length?` Not found: <span class="warn">${miss.join(', ')}</span>. Review, then press See my risk.`:' Review, then press See my risk.');
+}
+function parseLab(text){const found={};
+  for(const f of DATA.featureNames){const pats=PDF_SYN[f]; if(!pats)continue;
+    for(const re of pats){const m=re.exec(text); if(!m)continue;
+      const after=text.slice(m.index+m[0].length, m.index+m[0].length+40);
+      const num=after.match(/[-+]?\d{1,4}(?:\.\d+)?/); if(num){found[f]=parseFloat(num[0]); break;}}}
+  return found;
+}
+async function readPdf(file){const buf=await file.arrayBuffer(); const pdf=await pdfjsLib.getDocument({data:buf}).promise;
+  let t=''; for(let p=1;p<=pdf.numPages;p++){const pg=await pdf.getPage(p); const c=await pg.getTextContent(); t+=c.items.map(i=>i.str).join(' ')+' \n';} return t;}
+function ingestUpload(file){
+  if(!DATA){toast('Still calibrating — try again in a moment.');return;}
+  const name=file.name.toLowerCase();
+  if(name.endsWith('.pdf')){
+    if(!window.pdfjsLib){toast('PDF library failed to load.');return;}
+    $('upnote').textContent='Reading PDF…';
+    readPdf(file).then(t=>{ if(!t.trim()){$('upnote').innerHTML='<span class="warn">No text found — looks like a scanned image PDF. Enter values manually.</span>';return;}
+      fillFound(parseLab(t)); }).catch(()=>{$('upnote').textContent=''; toast('Could not read that PDF.');});
+  } else {
+    const rd=new FileReader();
+    rd.onload=()=>{const p=Papa.parse(rd.result,{header:true,skipEmptyLines:true}); const row=(p.data||[])[0];
+      if(!row){toast('No rows in that CSV.');return;}
+      const found={}; DATA.featureNames.forEach(f=>{const v=Number(row[f]); if(Number.isFinite(v)) found[f]=v;});
+      fillFound(found);};
+    rd.readAsText(file);
+  }
+}
+const updrop=$('updrop'), upfile=$('upfile');
+upfile.onchange=e=>{const f=e.target.files[0]; if(f) ingestUpload(f); upfile.value='';};
+['dragenter','dragover'].forEach(ev=>updrop.addEventListener(ev,e=>{e.preventDefault();updrop.classList.add('drag');}));
+['dragleave','drop'].forEach(ev=>updrop.addEventListener(ev,e=>{e.preventDefault();updrop.classList.remove('drag');}));
+updrop.addEventListener('drop',e=>{const f=e.dataTransfer.files[0]; if(f) ingestUpload(f);});
+
+/* =====================================================================
+   HISTOGRAM
+   ===================================================================== */
+let chart=null;
+const cssVar=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const hexA=(hex,a)=>{const h=hex.replace('#','');if(h.length!==6)return hex;const r=parseInt(h.substr(0,2),16),g=parseInt(h.substr(2,2),16),b=parseInt(h.substr(4,2),16);return`rgba(${r},${g},${b},${a})`;};
+function roundRect(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath();}
+const markerPlugin={id:'bands',afterDraw(ch){if(!MODEL)return; const {ctx,chartArea:a}=ch;
+  const acc=cssVar('--accent'),txt=cssVar('--text'),muted=cssVar('--muted'),surf=cssVar('--surface'),border=cssVar('--border');
+  const xp=s=>a.left+(a.right-a.left)*(Math.max(0,Math.min(100,s))/100); ctx.save();
+  ctx.setLineDash([4,4]);ctx.lineWidth=1;ctx.strokeStyle=hexA(muted,.5);
+  [20,40,60,80].forEach(v=>{const x=xp(v);ctx.beginPath();ctx.moveTo(x,a.top);ctx.lineTo(x,a.bottom);ctx.stroke();});
+  ctx.setLineDash([]);ctx.textAlign='center';ctx.font=`600 11px ${(cssVar('--mono')||'monospace').replace(/"/g,'')}`;
+  MODEL.bands.forEach(b=>{const cx=xp((b.lo+(b.hi>100?100:b.hi))/2),ty=a.top+13,w=46,h=30;
+    ctx.fillStyle=hexA(surf,.92);ctx.strokeStyle=border;ctx.lineWidth=1;roundRect(ctx,cx-w/2,ty-11,w,h,6);ctx.fill();ctx.stroke();
+    ctx.fillStyle=muted;ctx.fillText(b.label,cx,ty);ctx.fillStyle=txt;ctx.fillText(b.prev==null?'—':b.prev.toFixed(0)+'%',cx,ty+13);});
+  if(typeof userScore==='number'){const x=xp(userScore);ctx.lineWidth=2.5;ctx.strokeStyle=acc;
+    ctx.beginPath();ctx.moveTo(x,a.top);ctx.lineTo(x,a.bottom);ctx.stroke();
+    const tag=`You · ${userScore.toFixed(0)}%`;ctx.font=`600 11px ${(cssVar('--mono')||'monospace').replace(/"/g,'')}`;
+    const tw=ctx.measureText(tag).width+14;let bx=x+6;if(bx+tw>a.right)bx=x-6-tw;
+    ctx.fillStyle=acc;roundRect(ctx,bx,a.bottom-26,tw,20,6);ctx.fill();ctx.fillStyle=cssVar('--accent-ink');ctx.textAlign='left';ctx.fillText(tag,bx+7,a.bottom-12);}
+  ctx.restore();}};
+function buildChart(){
+  if(!MODEL)return; const el=$('histChart'); if(chart)chart.destroy();
+  const non=cssVar('--c-nondiabetic'),dia=cssVar('--c-diabetic'),grid=cssVar('--border'),txt=cssVar('--muted');
+  const labels=MODEL.binN.map((_,i)=>i*5);
+  chart=new Chart(el,{type:'bar',
+    data:{labels,datasets:[
+      {label:'Non-diabetic',data:MODEL.binN,backgroundColor:hexA(non,.62),borderColor:hexA(non,.9),borderWidth:.5,grouped:false,categoryPercentage:1,barPercentage:1},
+      {label:'Diabetic',data:MODEL.binD,backgroundColor:hexA(dia,.6),borderColor:hexA(dia,.9),borderWidth:.5,grouped:false,categoryPercentage:1,barPercentage:1}]},
+    options:{responsive:true,maintainAspectRatio:false,animation:{duration:350},
+      scales:{x:{grid:{display:false},border:{color:grid},ticks:{color:txt,maxRotation:0,callback:(v,i)=>labels[i]%20===0?labels[i]:''},title:{display:true,text:'Estimated risk score',color:txt}},
+        y:{grid:{color:hexA(grid,.6)},border:{display:false},ticks:{color:txt},title:{display:true,text:'People',color:txt}}},
+      plugins:{legend:{display:false},tooltip:{callbacks:{title:it=>`Risk ${it[0].label}–${(+it[0].label)+5}%`}}}},
+    plugins:[markerPlugin]});
+}
+
+/* =====================================================================
+   BOOT — load the reference cohort and calibrate the model behind the scenes
+   ===================================================================== */
+(async function(){
+  try{ const w=await fetch('weights.json',{cache:'no-store'}); if(w.ok) PUBLISHED=await w.json(); }catch(e){/* no published model yet */}
+  try{
+    const res=await fetch('Diabetes%20Classification%202.csv');
+    if(!res.ok) throw 0;
+    loadCohort(await res.text());
+  }catch(e){
+    setStatus(false,'Cohort CSV not found');
+    $('emptyNote').innerHTML='The reference dataset <code>Diabetes Classification 2.csv</code> needs to sit next to this page. Open via a local server or GitHub Pages.';
+  }
+})();
+</script>
+</body>
+</html>

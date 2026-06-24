@@ -1,0 +1,245 @@
+% Mathematical Model: Type-2 Diabetes Risk Screening
+% Copy this into your report or compile standalone with: pdflatex mathematical-model.tex
+
+\section{Mathematical Model: Type-2 Diabetes Risk Screening}
+
+\subsection{Problem Setup}
+
+Each person in the dataset is described by $D$ blood-work features and a binary diagnosis label.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{cl}
+\hline
+\textbf{Symbol} & \textbf{Meaning} \\
+\hline
+$i = 1,\ldots,N$ & Person index in the training cohort \\
+$j = 1,\ldots,D$ & Feature (marker) index \\
+$r_{ij}$ & Raw value of marker $j$ for person $i$ \\
+$y_i \in \{0,1\}$ & Outcome: $0$ = non-diabetic, $1$ = diabetic \\
+\hline
+\end{tabular}
+\caption{Notation for the diabetes risk model.}
+\end{table}
+
+Typical features include Age, BMI, Glucose, Cholesterol, Triglycerides, HDL, LDL, Creatinine, and Urea. The goal is to learn a function that estimates the probability of diabetes from blood-work alone.
+
+\subsection{Feature Standardisation}
+
+Before training, each raw feature is converted to a standardised score so markers on different scales are comparable.
+
+\paragraph{Population mean of feature $j$:}
+\begin{equation}
+    \mu_j = \frac{1}{N}\sum_{i=1}^{N} r_{ij}
+\end{equation}
+
+\paragraph{Population standard deviation of feature $j$:}
+\begin{equation}
+    \sigma_j = \sqrt{\frac{1}{N}\sum_{i=1}^{N}(r_{ij} - \mu_j)^2}
+\end{equation}
+
+\paragraph{Standardised feature:}
+\begin{equation}
+    x_{ij} = \frac{r_{ij} - \mu_j}{\sigma_j}
+\end{equation}
+
+After standardisation, each feature has mean $0$ and standard deviation $1$ across the cohort.
+
+\paragraph{Missing values.} If a user leaves a field blank at prediction time, the model assumes the cohort average by setting $x_j = 0$, which corresponds to $r_j = \mu_j$.
+
+\subsection{Logistic Regression Model}
+
+The model is a binary logistic regression classifier. It computes a linear combination of standardised features, then passes the result through a sigmoid function to produce a probability.
+
+\paragraph{Linear score:}
+\begin{equation}
+    z_i = b + \sum_{j=1}^{D} W_j \, x_{ij}
+    \label{eq:linear-score}
+\end{equation}
+
+where $W_j$ is the learned weight for feature $j$, $b$ is the learned bias (intercept), and $z_i$ is the raw log-odds score for person $i$.
+
+\paragraph{Sigmoid (logistic) function:}
+\begin{equation}
+    \hat{p}_i = \sigma(z_i) = \frac{1}{1 + e^{-z_i}}
+    \label{eq:sigmoid}
+\end{equation}
+
+This maps any real number $z_i$ to a probability $\hat{p}_i \in (0,1)$. For numerical stability, $z_i$ is clipped to $[-30, 30]$ before applying the exponential.
+
+\paragraph{User-facing risk score:}
+\begin{equation}
+    \text{Risk score} = 100 \times \hat{p}_i
+    \label{eq:risk-score}
+\end{equation}
+
+A score of $42\%$ means the model estimates a $42\%$ probability of diabetes given the entered blood-work.
+
+\subsection{Loss Function}
+
+The model is trained by minimising binary cross-entropy (log-loss) with L2 (ridge) regularisation on the weights.
+
+\paragraph{Cross-entropy for one person:}
+\begin{equation}
+    \mathcal{L}_i = -\left[ y_i \log(\hat{p}_i) + (1 - y_i)\log(1 - \hat{p}_i) \right]
+    \label{eq:cross-entropy}
+\end{equation}
+
+If $y_i = 1$ (diabetic), the loss is $-\log(\hat{p}_i)$, penalising low predicted probability. If $y_i = 0$ (non-diabetic), the loss is $-\log(1 - \hat{p}_i)$, penalising high predicted probability.
+
+\paragraph{Full training objective:}
+\begin{equation}
+    \mathcal{L} = \frac{1}{N}\sum_{i=1}^{N} \mathcal{L}_i + \frac{\lambda}{2}\sum_{j=1}^{D} W_j^2
+    \label{eq:full-loss}
+\end{equation}
+
+where $\lambda = 0.0005$ is the regularisation strength, discouraging very large weights and reducing overfitting. The bias $b$ is not regularised.
+
+\subsection{Training: Batch Gradient Descent}
+
+Weights are updated iteratively using batch gradient descent over the full dataset.
+
+\paragraph{Prediction error:}
+\begin{equation}
+    \delta_i = \hat{p}_i - y_i
+\end{equation}
+
+\paragraph{Gradients:}
+\begin{align}
+    \frac{\partial \mathcal{L}}{\partial W_j} &= \frac{1}{N}\sum_{i=1}^{N} \delta_i \, x_{ij} + \lambda W_j
+    \label{eq:grad-w} \\
+    \frac{\partial \mathcal{L}}{\partial b} &= \frac{1}{N}\sum_{i=1}^{N} \delta_i
+    \label{eq:grad-b}
+\end{align}
+
+\paragraph{Parameter updates:}
+\begin{align}
+    W_j &\leftarrow W_j - \eta \left( \frac{1}{N}\sum_{i=1}^{N} \delta_i \, x_{ij} + \lambda W_j \right)
+    \label{eq:update-w} \\
+    b &\leftarrow b - \eta \left( \frac{1}{N}\sum_{i=1}^{N} \delta_i \right)
+    \label{eq:update-b}
+\end{align}
+
+where $\eta$ is the learning rate.
+
+\paragraph{Training schedule.}
+\begin{table}[h]
+\centering
+\begin{tabular}{lccc}
+\hline
+\textbf{Scenario} & \textbf{Epochs} & \textbf{Learning rate $\eta$} & \textbf{$\lambda$} \\
+\hline
+Initial training (no published weights) & 320 & 0.5 & 0.0005 \\
+Published model + local confirmations & 60 & 0.3 & 0.0005 \\
+User confirms diagnosis (fine-tune) & 40 & 0.4 & 0.0005 \\
+Offline retrain script & 500 & 0.5 & 0.0005 \\
+\hline
+\end{tabular}
+\caption{Training hyperparameters used in the application.}
+\end{table}
+
+Weights are initialised to zero ($W_j = 0$, $b = 0$) at the start of training.
+
+\subsection{Prediction for a New User}
+
+Given a new person's raw blood-work values $r_1, \ldots, r_D$:
+
+\begin{enumerate}
+    \item \textbf{Standardise:}
+    \begin{equation}
+        x_j = \frac{r_j - \mu_j}{\sigma_j} \quad \text{(or } x_j = 0 \text{ if } r_j \text{ is missing)}
+    \end{equation}
+
+    \item \textbf{Compute linear score:}
+    \begin{equation}
+        z = b + \sum_{j=1}^{D} W_j \, x_j
+    \end{equation}
+
+    \item \textbf{Apply sigmoid:}
+    \begin{equation}
+        \hat{p} = \frac{1}{1 + e^{-z}}
+    \end{equation}
+
+    \item \textbf{Convert to percentage:}
+    \begin{equation}
+        \text{Risk score} = 100\hat{p}\%
+    \end{equation}
+\end{enumerate}
+
+\subsection{Risk Bands and Calibration Statistics}
+
+The application groups people into five risk bands and reports observed diabetes prevalence within each band.
+
+\paragraph{Risk bands.}
+\begin{table}[h]
+\centering
+\begin{tabular}{cl}
+\hline
+\textbf{Band} & \textbf{Score range} \\
+\hline
+Low & $0$ -- $20\%$ \\
+& $20$ -- $40\%$ \\
+& $40$ -- $60\%$ \\
+& $60$ -- $80\%$ \\
+High & $80$ -- $100\%$ \\
+\hline
+\end{tabular}
+\caption{Risk band definitions.}
+\end{table}
+
+\paragraph{Band prevalence.}
+For band $B$ with score bounds $[L, U)$:
+\begin{equation}
+    \text{Prevalence}_B = 100 \times \frac{n_{\text{diabetic in }B}}{n_{\text{total in }B}}
+    \label{eq:band-prevalence}
+\end{equation}
+
+where $n_{\text{total in }B}$ is the count of confirmed people whose model score falls in $[L, U)$, and $n_{\text{diabetic in }B}$ is how many of those were actually diabetic. This gives an empirical calibration of model scores against real outcomes.
+
+\paragraph{Wilson 95\% confidence interval.}
+For a band with $k$ diabetic cases out of $n$ people, the $95\%$ confidence interval for the true prevalence uses the Wilson score interval with $z = 1.96$:
+\begin{align}
+    \hat{p} &= \frac{k}{n} \\
+    \text{centre} &= \frac{\hat{p} + \dfrac{z^2}{2n}}{1 + \dfrac{z^2}{n}} \\
+    \text{margin} &= \frac{z}{1 + \dfrac{z^2}{n}} \sqrt{\frac{\hat{p}(1-\hat{p})}{n} + \frac{z^2}{4n^2}} \\
+    \text{95\% CI} &= \left[ \max\!\left(0,\; \text{centre} - \text{margin}\right),\; \min\!\left(1,\; \text{centre} + \text{margin}\right) \right] \times 100\%
+\end{align}
+
+\paragraph{Percentile rank.}
+The user's score is compared to the whole cohort:
+\begin{equation}
+    \text{Percentile} = 100 \times \frac{\#\{\text{cohort scores} < \text{user score}\}}{N}
+    \label{eq:percentile}
+\end{equation}
+
+\subsection{Histogram}
+
+The distribution chart divides scores into $20$ bins, each $5$ percentage points wide:
+\begin{equation}
+    \text{bin index} = \min\!\left(19,\; \left\lfloor \frac{\text{score}}{5} \right\rfloor \right)
+\end{equation}
+
+Each bin counts how many confirmed non-diabetic and diabetic people fall in that score range.
+
+\subsection{Online Learning}
+
+When a user confirms their real diagnosis, their blood-work vector is added to the training set and the model is fine-tuned with $40$ additional gradient-descent steps using the same update rules given in Equations~\eqref{eq:update-w} and~\eqref{eq:update-b}. Confirmed results may be stored locally in the browser or sent to a database for periodic offline retraining.
+
+\subsection{Summary}
+
+The full prediction pipeline is:
+\begin{equation}
+    \boxed{\text{Risk (\%)} = 100 \times \sigma\!\left( b + \sum_{j=1}^{D} W_j \cdot \frac{r_j - \mu_j}{\sigma_j} \right)}
+    \label{eq:summary}
+\end{equation}
+
+Raw blood-work values are standardised, combined with learned weights via a linear score, transformed by the sigmoid function, and expressed as a percentage risk. The weights are learned by minimising cross-entropy loss with L2 regularisation using batch gradient descent, and are updated further when users confirm their diagnoses.
+
+\subsection{Limitations}
+
+\begin{itemize}
+    \item The model assumes a linear relationship between features and log-odds (logistic regression).
+    \item Missing values are imputed as the population mean, which reduces confidence but still produces a score.
+    \item Band prevalences are descriptive statistics over the reference cohort, not independent predictions.
+    \item The system is a screening aid and personal-project demonstration, not a medical device or diagnostic tool.
+\end{itemize}

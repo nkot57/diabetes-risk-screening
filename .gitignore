@@ -1,0 +1,16 @@
+# macOS
+.DS_Store
+
+# Agent / editor config
+.claude/
+
+# Locally collected submissions / data exports (may contain data)
+submissions.csv
+
+# Node
+node_modules/
+
+# Secrets — never commit these
+.env
+.env.*
+*.secret

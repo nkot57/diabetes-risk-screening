@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>DiabetesNet — watch a model learn</title>
+<meta name="description" content="A neural network trained from scratch in the browser with gradient descent and binary cross-entropy — the same optimization that underlies LLM training — applied to diabetes risk screening." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  :root{
+    --bg:#0e1217; --surface:#161b22; --surface-2:#1d242d; --border:#2a333d;
+    --text:#e7edf3; --muted:#93a1ad;
+    --accent:#4f9fff; --accent-ink:#06101c;
+    --pos:#d23950;  /* pushes risk up   */
+    --neg:#2f9e6f;  /* pushes risk down */
+    --warn:#c77d11;
+    --radius:9px; --maxw:1240px;
+    --mono:"IBM Plex Mono",monospace; --sans:"IBM Plex Sans",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--bg); color:var(--text); font-family:var(--sans);
+    -webkit-font-smoothing:antialiased; line-height:1.55; font-size:14.5px}
+  .wrap{max-width:var(--maxw); margin:0 auto; padding:0 24px}
+  h1,h2,h3{margin:0; font-weight:600; letter-spacing:-.01em}
+  .mono{font-family:var(--mono); font-variant-numeric:tabular-nums}
+  a{color:var(--accent)}
+  button{font-family:var(--sans)}
+
+  header{border-bottom:1px solid var(--border); background:var(--surface); position:sticky; top:0; z-index:20}
+  .hbar{display:flex; align-items:center; gap:14px; height:62px}
+  .logo{width:30px;height:30px;flex:none}
+  .htitle h1{font-size:16px}
+  .htitle small{color:var(--muted); font-size:11.5px; font-family:var(--mono); letter-spacing:.04em}
+  .spacer{flex:1}
+  .ghlink{font-size:12.5px; color:var(--muted); text-decoration:none; border:1px solid var(--border); padding:7px 12px; border-radius:7px}
+  .ghlink:hover{border-color:var(--muted); color:var(--text)}
+
+  .hero{padding:26px 0 6px}
+  .hero .eyebrow{font-family:var(--mono); font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--accent)}
+  .hero h2{font-size:26px; margin:8px 0 8px}
+  .hero p{color:var(--muted); max-width:80ch; margin:0; font-size:14.5px}
+
+  main{padding:18px 0 60px}
+  .grid{display:grid; grid-template-columns:330px 1fr; gap:18px; align-items:start}
+  @media(max-width:1000px){ .grid{grid-template-columns:1fr} }
+  .col{display:grid; gap:18px}
+
+  .card{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius)}
+  .hd{padding:14px 16px 0}
+  .hd h3{font-size:13.5px; display:flex; align-items:center; gap:8px}
+  .hd .sub{color:var(--muted); font-size:12px; margin-top:3px}
+  .bd{padding:14px 16px 16px}
+
+  .btn{font-size:13px; font-weight:500; border:1px solid var(--border); background:var(--surface-2); color:var(--text);
+    padding:9px 13px; border-radius:7px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:7px; transition:.14s}
+  .btn:hover{border-color:var(--muted)}
+  .btn.primary{background:var(--accent); color:var(--accent-ink); border-color:var(--accent); font-weight:600}
+  .btn.primary:hover{filter:brightness(1.08)}
+  .btn:disabled{opacity:.4; cursor:not-allowed}
+  .btn.sm{padding:6px 10px; font-size:12px}
+  .btn.danger{color:var(--pos); border-color:color-mix(in srgb,var(--pos) 45%,var(--border))}
+  .btn.good{color:var(--neg); border-color:color-mix(in srgb,var(--neg) 45%,var(--border))}
+  .row{display:flex; gap:8px}
+  .row > *{flex:1}
+
+  .drop{border:1.5px dashed var(--border); border-radius:8px; padding:16px; text-align:center; cursor:pointer; color:var(--muted); transition:.14s; font-size:12.5px}
+  .drop.drag{border-color:var(--accent); background:color-mix(in srgb,var(--accent) 8%,var(--surface)); color:var(--text)}
+  .orline{display:flex; align-items:center; gap:10px; color:var(--muted); font-size:10.5px; font-family:var(--mono); letter-spacing:.1em; margin:10px 0}
+  .orline::before,.orline::after{content:""; height:1px; background:var(--border); flex:1}
+
+  .field{margin-bottom:11px}
+  .field label{display:flex; justify-content:space-between; font-size:11.5px; font-weight:600; margin-bottom:4px; color:var(--text)}
+  .field label span{color:var(--muted); font-weight:400; font-family:var(--mono); font-size:10px}
+  .field input, .field select{width:100%; padding:8px 10px; border:1px solid var(--border); border-radius:6px;
+    background:var(--bg); color:var(--text); font:inherit; font-size:13.5px; font-variant-numeric:tabular-nums}
+  .field input:focus, .field select:focus{outline:2px solid var(--accent); outline-offset:1px}
+  .twocol{display:grid; grid-template-columns:1fr 1fr; gap:9px}
+
+  .seg{display:flex; background:var(--bg); border:1px solid var(--border); border-radius:7px; padding:3px}
+  .seg button{flex:1; border:none; background:none; padding:7px; border-radius:5px; cursor:pointer; color:var(--muted); font:inherit; font-size:12.5px; font-weight:500}
+  .seg button.on{background:var(--surface-2); color:var(--text)}
+
+  .statgrid{display:grid; grid-template-columns:repeat(4,1fr); gap:1px; background:var(--border); border:1px solid var(--border); border-radius:8px; overflow:hidden}
+  .stat{background:var(--surface); padding:11px 13px}
+  .stat .k{font-family:var(--mono); font-size:9.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted)}
+  .stat .v{font-size:21px; font-weight:600; margin-top:2px; font-variant-numeric:tabular-nums}
+  .stat .v small{font-size:12px; color:var(--muted); font-weight:500}
+
+  .chartbox{position:relative; height:300px}
+
+  /* weight bars */
+  .weights{display:flex; flex-direction:column; gap:7px}
+  .wrow{display:grid; grid-template-columns:96px 1fr 64px; gap:10px; align-items:center; font-size:12.5px}
+  .wrow .nm{font-weight:500}
+  .wtrack{position:relative; height:8px; background:var(--bg); border-radius:5px; border:1px solid var(--border)}
+  .wtrack .mid{position:absolute; left:50%; top:-2px; bottom:-2px; width:1px; background:var(--border)}
+  .wtrack .fill{position:absolute; top:0; bottom:0; border-radius:4px; transition:width .25s ease, left .25s ease, background .25s}
+  .wval{font-family:var(--mono); font-size:11.5px; text-align:right; color:var(--muted)}
+
+  .metricgrid{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+  .metric{background:var(--bg); border:1px solid var(--border); border-radius:7px; padding:11px 13px}
+  .metric .k{font-family:var(--mono); font-size:9.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted)}
+  .metric .v{font-size:24px; font-weight:600; margin-top:3px; font-variant-numeric:tabular-nums}
+  .cm{display:grid; grid-template-columns:auto 1fr 1fr; gap:4px; font-size:11.5px; margin-top:6px}
+  .cm .cell{background:var(--bg); border:1px solid var(--border); border-radius:5px; padding:7px; text-align:center}
+  .cm .lab{color:var(--muted); font-family:var(--mono); font-size:9.5px; display:flex; align-items:center; justify-content:center}
+  .cm .cell b{display:block; font-size:16px}
+  .cm .tp b,.cm .tn b{color:var(--neg)} .cm .fp b,.cm .fn b{color:var(--pos)}
+
+  .readout{margin-top:12px; border-top:1px solid var(--border); padding-top:12px}
+  .score{font-size:40px; font-weight:600; line-height:1; font-variant-numeric:tabular-nums}
+  .score small{font-size:15px; color:var(--muted)}
+  .meter{height:7px; border-radius:5px; margin-top:10px; background:var(--bg); overflow:hidden; border:1px solid var(--border)}
+  .meter > i{display:block; height:100%; background:var(--accent); width:0; transition:width .5s cubic-bezier(.2,.7,.2,1)}
+  .verdict{margin-top:9px; font-size:12.5px; color:var(--muted)}
+
+  .log{margin-top:10px; display:flex; flex-direction:column; gap:6px; max-height:150px; overflow:auto; font-size:11.5px}
+  .logitem{display:grid; grid-template-columns:auto 1fr; gap:8px; color:var(--muted)}
+  .logitem .tk{font-family:var(--mono); font-size:10px; white-space:nowrap}
+  .logitem b{color:var(--text)}
+
+  .hint{font-size:11.5px; color:var(--muted); margin-top:8px; line-height:1.5}
+  .pill{font-family:var(--mono); font-size:10.5px; padding:2px 7px; border-radius:5px; border:1px solid var(--border); color:var(--muted)}
+
+  details.explain{margin-top:20px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius)}
+  details.explain > summary{cursor:pointer; list-style:none; padding:14px 16px; font-weight:600; font-size:13.5px; display:flex; align-items:center; gap:8px}
+  details.explain > summary::-webkit-details-marker{display:none}
+  details.explain .ebody{padding:0 16px 18px; color:var(--muted); font-size:13px; line-height:1.7}
+  details.explain table{width:100%; border-collapse:collapse; margin:10px 0; font-size:12.5px}
+  details.explain td,details.explain th{text-align:left; padding:7px 10px; border-bottom:1px solid var(--border); vertical-align:top}
+  details.explain th{font-family:var(--mono); font-size:10px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-weight:400}
+  details.explain b{color:var(--text)}
+  code{font-family:var(--mono); font-size:12px; background:var(--bg); border:1px solid var(--border); border-radius:4px; padding:1px 5px}
+
+  footer{border-top:1px solid var(--border); padding:22px 0 50px; color:var(--muted); font-size:12px; margin-top:30px}
+  footer b{color:var(--text)} footer .warn b{color:var(--warn)}
+
+  .toast{position:fixed; bottom:22px; left:50%; transform:translateX(-50%) translateY(20px); background:var(--text); color:var(--bg);
+    padding:10px 16px; border-radius:8px; font-size:13px; opacity:0; pointer-events:none; transition:.28s; z-index:60; font-weight:500}
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap hbar">
+    <svg class="logo" viewBox="0 0 40 40" fill="none">
+      <rect x="1.5" y="1.5" width="37" height="37" rx="9" stroke="var(--accent)" stroke-width="1.5" opacity=".4"/>
+      <circle cx="11" cy="20" r="3" fill="var(--accent)"/>
+      <circle cx="29" cy="13" r="3" fill="var(--muted)"/>
+      <circle cx="29" cy="27" r="3" fill="var(--muted)"/>
+      <path d="M14 20 L26 13 M14 20 L26 27" stroke="var(--accent)" stroke-width="1.5"/>
+    </svg>
+    <div class="htitle"><h1>DiabetesNet</h1><small>gradient descent · from scratch · in your browser</small></div>
+    <div class="spacer"></div>
+    <a class="ghlink" id="ghlink" href="#" target="_blank" rel="noopener">View source</a>
+  </div>
+</header>
+
+<div class="wrap hero">
+  <div class="eyebrow">Trainable model</div>
+  <h2>A neural network you can watch learn.</h2>
+  <p>This page trains a classifier <b>from scratch</b> — no ML libraries — using the same machinery that underlies large language models: a forward pass, a <b>binary cross-entropy</b> loss, and <b>gradient descent</b> that nudges the weights, epoch by epoch, toward predictions that match reality. Load a blood-work dataset, press Train, and watch the loss fall and the weights settle.</p>
+</div>
+
+<main class="wrap">
+  <div class="grid">
+
+    <!-- ================= LEFT: controls ================= -->
+    <div class="col">
+      <section class="card">
+        <div class="hd"><h3>1 · Data</h3><div class="sub">A CSV with a <code>Diagnosis</code> column (0/1) and numeric blood-work columns.</div></div>
+        <div class="bd">
+          <label class="drop" id="drop">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" style="vertical-align:-3px;margin-right:6px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
+            Drop a CSV here, or click to browse
+            <input id="file" type="file" accept=".csv,text/csv" hidden />
+          </label>
+          <div class="orline">or</div>
+          <button class="btn" id="exampleBtn" style="width:100%">Load the example diabetes dataset</button>
+          <div class="hint" id="dataHint">No data loaded yet.</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="hd"><h3>2 · Model &amp; training</h3><div class="sub">Hyper-parameters — the knobs you turn before training.</div></div>
+        <div class="bd">
+          <div class="field">
+            <label>Architecture</label>
+            <div class="seg" id="archSeg">
+              <button data-arch="lr" class="on">Logistic regression</button>
+              <button data-arch="mlp">+ Hidden layer</button>
+            </div>
+          </div>
+          <div class="twocol">
+            <div class="field" id="hiddenField" style="display:none">
+              <label>Hidden units <span>ReLU</span></label>
+              <input id="hidden" type="number" value="6" min="1" max="32" step="1">
+            </div>
+            <div class="field">
+              <label>Learning rate <span>η</span></label>
+              <input id="lr" type="number" value="0.5" min="0.001" step="0.05">
+            </div>
+            <div class="field">
+              <label>Epochs / run</label>
+              <input id="epochs" type="number" value="300" min="10" step="10">
+            </div>
+            <div class="field">
+              <label>Test split <span>%</span></label>
+              <input id="split" type="number" value="20" min="5" max="50" step="5">
+            </div>
+            <div class="field">
+              <label>L2 reg <span>λ</span></label>
+              <input id="l2" type="number" value="0.0005" min="0" step="0.0005">
+            </div>
+            <div class="field">
+              <label>Input dropout <span>0–0.5</span></label>
+              <input id="dropout" type="number" value="0" min="0" max="0.5" step="0.05">
+            </div>
+          </div>
+          <div class="hint" style="margin-top:-2px">Input dropout &gt; 0 randomly hides that fraction of markers each step, teaching the model to score <b>partial</b> blood panels.</div>
+          <div class="row">
+            <button class="btn primary" id="trainBtn">Train ▶</button>
+            <button class="btn" id="stopBtn" disabled>Stop</button>
+            <button class="btn" id="resetBtn">Reset weights</button>
+          </div>
+          <div class="hint">Training and inference all run locally in your browser — nothing is uploaded.</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="hd"><h3>4 · Screen a patient</h3><div class="sub">Run new blood-work through the trained model.</div></div>
+        <div class="bd">
+          <label class="drop" id="pdfdrop" style="margin-bottom:8px">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" style="vertical-align:-3px;margin-right:6px"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
+            Import a blood-test PDF — auto-fills the fields for you to confirm
+            <input id="pdffile" type="file" accept="application/pdf" hidden />
+          </label>
+          <div class="hint" id="pdfNote" style="margin:-2px 0 11px"></div>
+          <div class="twocol" id="inferInputs"><div class="hint">Load data first to build the input panel.</div></div>
+          <div class="hint" style="margin:2px 0 8px">Leave any marker blank and it's assumed average — the model still scores the rest, at lower confidence.</div>
+          <div class="row" style="margin-top:4px">
+            <button class="btn primary" id="predictBtn" disabled>Predict risk</button>
+            <button class="btn" id="sampleBtn" disabled>Random sample</button>
+          </div>
+          <div class="readout" id="readout" hidden>
+            <div><span class="pill" id="riskLabel">—</span></div>
+            <div style="margin-top:6px"><span class="score mono" id="scoreNum">0<small>%</small></span></div>
+            <div class="meter"><i id="meterFill"></i></div>
+            <div class="verdict" id="verdict"></div>
+            <div class="orline" style="margin:12px 0 8px">teach the model this case</div>
+            <div class="row">
+              <button class="btn sm good" id="teachNon" disabled>Confirmed non-diabetic</button>
+              <button class="btn sm danger" id="teachDia" disabled>Confirmed diabetic</button>
+            </div>
+            <div class="hint">Adds the case to the training set and runs a few gradient steps — online fine-tuning, like continuing to train a model on fresh data.</div>
+            <div class="log" id="log"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ================= RIGHT: training view ================= -->
+    <div class="col">
+      <section class="card">
+        <div class="hd"><h3>Training progress</h3><div class="sub">Loss should fall and accuracy should rise as the weights learn.</div></div>
+        <div class="bd">
+          <div class="statgrid" style="margin-bottom:14px">
+            <div class="stat"><div class="k">Epoch</div><div class="v mono" id="mEpoch">0</div></div>
+            <div class="stat"><div class="k">Train loss</div><div class="v mono" id="mTrainLoss">—</div></div>
+            <div class="stat"><div class="k">Test loss</div><div class="v mono" id="mTestLoss">—</div></div>
+            <div class="stat"><div class="k">Test acc</div><div class="v mono" id="mTestAcc">—</div></div>
+          </div>
+          <div class="chartbox"><canvas id="lossChart"></canvas></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="hd"><h3>3 · Learned weights</h3><div class="sub">Each weight is what the model learned about a marker — on standardized inputs, so they're comparable. <span style="color:var(--pos)">Red</span> pushes risk up, <span style="color:var(--neg)">green</span> down.</div></div>
+        <div class="bd">
+          <div class="weights" id="weights"><div class="hint">Train the model to see the weights it learns.</div></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="hd"><h3>Evaluation — held-out test set</h3><div class="sub">Measured on data the model never trained on.</div></div>
+        <div class="bd">
+          <div class="metricgrid">
+            <div class="metric"><div class="k">Accuracy</div><div class="v mono" id="evAcc">—</div></div>
+            <div class="metric"><div class="k">ROC-AUC</div><div class="v mono" id="evAuc">—</div></div>
+          </div>
+          <div class="cm" style="margin-top:10px">
+            <div class="lab"></div><div class="lab">Pred 0</div><div class="lab">Pred 1</div>
+            <div class="lab">Actual 0</div><div class="cell tn"><b id="cmTN">—</b>true neg</div><div class="cell fp"><b id="cmFP">—</b>false pos</div>
+            <div class="lab">Actual 1</div><div class="cell fn"><b id="cmFN">—</b>false neg</div><div class="cell tp"><b id="cmTP">—</b>true pos</div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <details class="explain">
+    <summary>How this maps to training a large language model</summary>
+    <div class="ebody">
+      <p>The model here is small, but the <b>training procedure is the same one used to train neural networks of every size, including LLMs</b>. Logistic regression is literally a single-neuron network with a sigmoid activation; flip on the hidden layer and you have a genuine multi-layer net trained by back-propagation.</p>
+      <table>
+        <thead><tr><th>LLM training</th><th>This project</th></tr></thead>
+        <tbody>
+          <tr><td>Billions of weights</td><td>One weight per blood-work marker (+ a bias), or a small weight matrix with the hidden layer</td></tr>
+          <tr><td>Forward pass: tokens → logits → softmax → probabilities</td><td>Blood-work → weighted sum → <b>sigmoid</b> → probability of diabetes</td></tr>
+          <tr><td><b>Cross-entropy</b> loss on the next token</td><td><b>Binary cross-entropy</b> on the diagnosis — the same loss family</td></tr>
+          <tr><td>Back-propagation + an optimizer step</td><td>Hand-written gradients + <code>w ← w − η·∇</code>, every epoch</td></tr>
+          <tr><td>Loss curve falls over training steps</td><td>The loss curve above, falling in real time</td></tr>
+          <tr><td>Fine-tuning on new data</td><td>"Teach the model this case" → a few more gradient steps</td></tr>
+        </tbody>
+      </table>
+      <p><b>A caveat worth stating, because it's the most interesting part:</b> a model only ever learns what is in its data. This dataset shows HDL cholesterol <i>rising</i> with diabetes — the opposite of the usual clinical relationship — so the model dutifully learns that "backwards" signal. That is exactly the bias problem LLMs face with their training corpora: the optimizer faithfully fits whatever pattern the data contains, correct or not.</p>
+    </div>
+  </details>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p class="warn"><b>Not a medical device.</b> This is a from-scratch machine-learning demonstration built on a public dataset of unverified origin. It does not diagnose anyone and must not be used for medical decisions.</p>
+    <p>Logistic regression / a one-hidden-layer neural network, trained with full-batch gradient descent and binary cross-entropy. Features are standardized on the training split only; evaluation is on a held-out test split. Everything runs client-side.</p>
+  </div>
+</footer>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+/* =====================================================================
+   DiabetesNet — a neural net trained from scratch in the browser.
+   No ML libraries: the forward pass, loss, gradients and the gradient-
+   descent update are all written out by hand below.
+   ===================================================================== */
+
+const $ = id => document.getElementById(id);
+function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.remove('show'),2400);}
+
+/* ----- tiny math ----- */
+const sigmoid = z => 1/(1+Math.exp(-Math.max(-30,Math.min(30,z))));
+const bce = (p,y)=>{const e=1e-7; p=Math.min(1-e,Math.max(e,p)); return -(y*Math.log(p)+(1-y)*Math.log(1-p));};
+const mean = a => a.reduce((x,y)=>x+y,0)/a.length;
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+
+/* =====================================================================
+   STATE
+   ===================================================================== */
+let DATA=null;          // {featureNames, Xtr, ytr, Xte, yte, mean, std, rawSample}
+let net=null;           // current model parameters
+let arch='lr', hidden=6;
+let training=false, epoch=0, targetEpoch=0;
+let history=[];         // [{epoch, trainLoss, testLoss, testAcc}]
+let lastInput=null;     // last standardized inference vector (for "teach")
+
+/* =====================================================================
+   MODEL  — logistic regression (arch='lr') or one hidden layer (arch='mlp')
+   ===================================================================== */
+function buildNet(){
+  const D = DATA.featureNames.length;
+  if(arch==='mlp'){
+    const H = hidden;
+    const he = s => (Math.random()*2-1)*Math.sqrt(2/s);
+    net = {
+      type:'mlp', D, H,
+      W1: Array.from({length:H},()=>Array.from({length:D},()=>he(D))),
+      b1: Array(H).fill(0),
+      W2: Array.from({length:H},()=>he(H)),
+      b2: 0
+    };
+  } else {
+    net = { type:'lr', D, W: Array(D).fill(0), b: 0 };  // zeros: convex, converges from anywhere
+  }
+  epoch=0; targetEpoch=0; history=[];
+}
+
+/* forward pass for one input vector -> probability (and cache for backprop) */
+function forward(net,x){
+  if(net.type==='lr'){
+    let z=net.b; for(let j=0;j<net.D;j++) z+=net.W[j]*x[j];
+    return {p:sigmoid(z)};
+  }
+  const a1=new Array(net.H), h=new Array(net.H);
+  for(let k=0;k<net.H;k++){let s=net.b1[k];for(let j=0;j<net.D;j++)s+=net.W1[k][j]*x[j];a1[k]=s;h[k]=s>0?s:0;}
+  let z=net.b2; for(let k=0;k<net.H;k++) z+=net.W2[k]*h[k];
+  return {p:sigmoid(z), a1, h};
+}
+const predictProba = x => forward(net,x).p;
+
+/* randomly zero a fraction p of the (already-standardized) features.
+   A zeroed standardized feature equals the population mean, which is exactly
+   the substitution used at test time for a missing marker — so training with
+   input dropout makes the model robust to partial blood panels. */
+function maskVec(x,p){ const o=new Array(x.length); for(let j=0;j<x.length;j++) o[j]=Math.random()<p?0:x[j]; return o; }
+
+/* one full-batch gradient-descent step over (X,y); returns mean training loss */
+function trainStep(X,y,lr,l2,dropout){
+  const N=X.length, D=net.D, drop=dropout||0;
+  let loss=0;
+  if(net.type==='lr'){
+    const gW=new Array(D).fill(0); let gb=0;
+    for(let i=0;i<N;i++){
+      const x = drop>0 ? maskVec(X[i],drop) : X[i];
+      const {p}=forward(net,x); const d=p-y[i];
+      for(let j=0;j<D;j++) gW[j]+=d*x[j];
+      gb+=d; loss+=bce(p,y[i]);
+    }
+    for(let j=0;j<D;j++) net.W[j]-=lr*(gW[j]/N + l2*net.W[j]);
+    net.b-=lr*(gb/N);
+  } else {
+    const H=net.H;
+    const gW1=Array.from({length:H},()=>new Array(D).fill(0)), gb1=new Array(H).fill(0);
+    const gW2=new Array(H).fill(0); let gb2=0;
+    for(let i=0;i<N;i++){
+      const x = drop>0 ? maskVec(X[i],drop) : X[i], c=forward(net,x), p=c.p, dz=p-y[i];      // dL/dz
+      for(let k=0;k<H;k++){
+        gW2[k]+=dz*c.h[k];
+        const dh = dz*net.W2[k];
+        const da = c.a1[k]>0 ? dh : 0;                       // ReLU'
+        for(let j=0;j<D;j++) gW1[k][j]+=da*x[j];
+        gb1[k]+=da;
+      }
+      gb2+=dz; loss+=bce(p,y[i]);
+    }
+    for(let k=0;k<H;k++){
+      net.W2[k]-=lr*(gW2[k]/N + l2*net.W2[k]);
+      for(let j=0;j<D;j++) net.W1[k][j]-=lr*(gW1[k][j]/N + l2*net.W1[k][j]);
+      net.b1[k]-=lr*(gb1[k]/N);
+    }
+    net.b2-=lr*(gb2/N);
+  }
+  return loss/N;
+}
+
+/* per-feature "importance": the weight (LR) or the linearized effective weight (MLP) */
+function featureWeights(){
+  const D=net.D;
+  if(net.type==='lr') return net.W.slice();
+  const eff=new Array(D).fill(0);
+  for(let j=0;j<D;j++){let s=0;for(let k=0;k<net.H;k++)s+=net.W2[k]*net.W1[k][j];eff[j]=s;}
+  return eff;
+}
+
+/* =====================================================================
+   EVALUATION
+   ===================================================================== */
+function evaluate(X,y){
+  let loss=0, correct=0, TP=0,FP=0,TN=0,FN=0;
+  const probs=new Array(X.length);
+  for(let i=0;i<X.length;i++){
+    const p=predictProba(X[i]); probs[i]=p; loss+=bce(p,y[i]);
+    const pred=p>=0.5?1:0;
+    if(pred===y[i]) correct++;
+    if(pred===1&&y[i]===1)TP++; else if(pred===1&&y[i]===0)FP++;
+    else if(pred===0&&y[i]===0)TN++; else FN++;
+  }
+  return {loss:loss/X.length, acc:correct/X.length, auc:rocAuc(probs,y), TP,FP,TN,FN};
+}
+/* ROC-AUC via the rank statistic (Mann–Whitney U), tie-aware */
+function rocAuc(scores,labels){
+  const n=scores.length, idx=[...Array(n).keys()].sort((a,b)=>scores[a]-scores[b]);
+  const rank=new Array(n); let i=0;
+  while(i<n){let j=i; while(j<n && scores[idx[j]]===scores[idx[i]]) j++; const r=(i+j+1)/2; for(let k=i;k<j;k++) rank[idx[k]]=r; i=j;}
+  let nPos=0, sumPos=0;
+  for(let k=0;k<n;k++) if(labels[k]===1){nPos++; sumPos+=rank[k];}
+  const nNeg=n-nPos; if(!nPos||!nNeg) return 0.5;
+  return (sumPos - nPos*(nPos+1)/2)/(nPos*nNeg);
+}
+
+/* =====================================================================
+   DATA LOADING
+   ===================================================================== */
+function numericColumns(rows, fields){
+  return fields.filter(f=>{
+    if(!f || f==='Diagnosis') return false;
+    let ok=0, tot=0;
+    for(const r of rows.slice(0,200)){ if(r[f]===''||r[f]==null) continue; tot++; if(Number.isFinite(Number(r[f]))) ok++; }
+    return tot>0 && ok/tot>0.9;
+  });
+}
+function ingestCSV(text, name){
+  const parsed = Papa.parse(text,{header:true,skipEmptyLines:true});
+  const fields = parsed.meta.fields||[];
+  if(!fields.includes('Diagnosis')){ toast('CSV needs a "Diagnosis" column (0/1).'); return; }
+  const features = numericColumns(parsed.data, fields);
+  if(features.length<2){ toast('Need at least two numeric feature columns.'); return; }
+
+  // build clean numeric rows
+  const X=[], y=[];
+  for(const r of parsed.data){
+    const d=Number(r.Diagnosis); if(d!==0&&d!==1) continue;
+    const row=new Array(features.length); let ok=true;
+    for(let j=0;j<features.length;j++){const v=Number(r[features[j]]); if(!Number.isFinite(v)){ok=false;break;} row[j]=v;}
+    if(ok){ X.push(row); y.push(d); }
+  }
+  if(X.length<40){ toast('Too few usable rows.'); return; }
+
+  // stratified train/test split
+  const testFrac = (+$('split').value||20)/100;
+  const pos=[],neg=[]; y.forEach((v,i)=>(v===1?pos:neg).push(i));
+  shuffle(pos); shuffle(neg);
+  const teP=Math.round(pos.length*testFrac), teN=Math.round(neg.length*testFrac);
+  const testIdx=shuffle([...pos.slice(0,teP),...neg.slice(0,teN)]);
+  const trainIdx=shuffle([...pos.slice(teP),...neg.slice(teN)]);
+
+  // standardize on TRAIN ONLY (no leakage)
+  const D=features.length, mu=new Array(D).fill(0), sd=new Array(D).fill(0);
+  for(const i of trainIdx) for(let j=0;j<D;j++) mu[j]+=X[i][j];
+  for(let j=0;j<D;j++) mu[j]/=trainIdx.length;
+  for(const i of trainIdx) for(let j=0;j<D;j++){const dd=X[i][j]-mu[j]; sd[j]+=dd*dd;}
+  for(let j=0;j<D;j++){ sd[j]=Math.sqrt(sd[j]/trainIdx.length)||1; }
+  const std = row => row.map((v,j)=>(v-mu[j])/sd[j]);
+
+  DATA = {
+    featureNames:features, mean:mu, std:sd,
+    Xtr:trainIdx.map(i=>std(X[i])), ytr:trainIdx.map(i=>y[i]),
+    Xte:testIdx.map(i=>std(X[i])),  yte:testIdx.map(i=>y[i]),
+    rawTrain:trainIdx.map(i=>X[i]), // raw values, for "random sample"
+    name
+  };
+
+  const nPos=y.filter(v=>v===1).length;
+  $('dataHint').innerHTML = `<b style="color:var(--text)">${X.length.toLocaleString()}</b> rows · ${D} features · `+
+    `${(100*nPos/X.length).toFixed(0)}% diabetic · split <b style="color:var(--text)">${trainIdx.length.toLocaleString()}</b> train / <b style="color:var(--text)">${testIdx.length.toLocaleString()}</b> test`;
+  buildNet();
+  renderInferInputs();
+  ['predictBtn','sampleBtn','teachNon','teachDia'].forEach(id=>$(id).disabled=false);
+  resetLossChart();
+  renderWeights(); renderMetrics(evaluate(DATA.Xte,DATA.yte)); renderTrainStats();
+  toast(`Loaded ${name} — press Train ▶`);
+}
+
+/* drop / browse / example */
+const drop=$('drop'), fileIn=$('file');
+fileIn.onchange=e=>{const f=e.target.files[0]; if(f){const rd=new FileReader();rd.onload=()=>ingestCSV(rd.result,f.name);rd.readAsText(f);}};
+['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('drag');}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('drag');}));
+drop.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f){const rd=new FileReader();rd.onload=()=>ingestCSV(rd.result,f.name);rd.readAsText(f);}});
+$('exampleBtn').onclick=async()=>{
+  try{
+    const res=await fetch('Diabetes%20Classification%202.csv');
+    if(!res.ok) throw 0;
+    ingestCSV(await res.text(),'Diabetes Classification 2.csv');
+  }catch(e){ toast('Example CSV not found next to this page — drop your own CSV instead.'); }
+};
+
+/* =====================================================================
+   TRAINING LOOP (animated)
+   ===================================================================== */
+function setTrainingUI(on){
+  training=on;
+  $('trainBtn').disabled=on; $('stopBtn').disabled=!on;
+  $('trainBtn').textContent = on ? 'Training…' : 'Train ▶';
+}
+function startTraining(){
+  if(!DATA){ toast('Load a dataset first.'); return; }
+  const lr=+$('lr').value||0.5, l2=+$('l2').value||0, eper=+$('epochs').value||300;
+  const drop=Math.max(0,Math.min(0.5,+$('dropout').value||0));
+  targetEpoch = epoch + eper;
+  setTrainingUI(true);
+  const loop=()=>{
+    if(!training) return;
+    const perFrame=4;                       // a few epochs per animation frame
+    for(let s=0;s<perFrame && epoch<targetEpoch;s++){
+      const tl=trainStep(DATA.Xtr,DATA.ytr,lr,l2,drop);
+      epoch++;
+      const ev=evaluate(DATA.Xte,DATA.yte);
+      history.push({epoch, trainLoss:tl, testLoss:ev.loss, testAcc:ev.acc});
+      window._lastEval=ev;
+    }
+    renderTrainStats(); renderWeights(); updateLossChart(); renderMetrics(window._lastEval);
+    if(epoch>=targetEpoch){ setTrainingUI(false); return; }
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+}
+$('trainBtn').onclick=startTraining;
+$('stopBtn').onclick=()=>setTrainingUI(false);
+$('resetBtn').onclick=()=>{ if(!DATA){toast('Load a dataset first.');return;} setTrainingUI(false); buildNet(); resetLossChart(); renderWeights(); renderMetrics(evaluate(DATA.Xte,DATA.yte)); renderTrainStats(); toast('Weights re-initialized.'); };
+
+/* architecture toggle */
+document.querySelectorAll('#archSeg button').forEach(b=>b.onclick=()=>{
+  arch=b.dataset.arch;
+  document.querySelectorAll('#archSeg button').forEach(x=>x.classList.toggle('on',x===b));
+  $('hiddenField').style.display = arch==='mlp' ? '' : 'none';
+  if(DATA){ setTrainingUI(false); buildNet(); resetLossChart(); renderWeights(); renderMetrics(evaluate(DATA.Xte,DATA.yte)); renderTrainStats(); }
+});
+$('hidden').onchange=()=>{ hidden=Math.max(1,Math.min(32,+$('hidden').value||6)); if(arch==='mlp'&&DATA){ buildNet(); resetLossChart(); renderWeights(); renderMetrics(evaluate(DATA.Xte,DATA.yte)); renderTrainStats(); } };
+
+/* =====================================================================
+   INFERENCE + ONLINE FINE-TUNING
+   ===================================================================== */
+function renderInferInputs(){
+  const host=$('inferInputs');
+  host.innerHTML = DATA.featureNames.map((f,j)=>
+    `<div class="field"><label>${f}</label><input id="inf_${j}" type="number" inputmode="decimal" placeholder="${DATA.mean[j].toFixed(1)}"></div>`
+  ).join('');
+}
+/* Read the form into a standardized vector. Blank fields are MEAN-IMPUTED:
+   a standardized value of 0 IS the population mean, contributing nothing to
+   the logit — i.e. "we don't know this marker, so assume average." */
+function readInferStandardized(){
+  const x=new Array(DATA.featureNames.length); const missing=[]; let nPresent=0;
+  for(let j=0;j<DATA.featureNames.length;j++){
+    const v=parseFloat($('inf_'+j).value);
+    if(Number.isFinite(v)){ x[j]=(v-DATA.mean[j])/DATA.std[j]; nPresent++; }
+    else { x[j]=0; missing.push(DATA.featureNames[j]); }
+  }
+  if(nPresent===0) return null;
+  return {x, missing};
+}
+function showPrediction(){
+  const res=readInferStandardized(); if(!res){ toast('Enter at least one marker.'); return; }
+  lastInput = res.x;
+  const p=predictProba(res.x), pct=100*p;
+  $('readout').hidden=false;
+  $('scoreNum').innerHTML = pct.toFixed(1)+'<small>%</small>';
+  $('meterFill').style.width=Math.max(2,pct)+'%';
+  const label = pct>=50?'Model predicts: diabetic':'Model predicts: non-diabetic';
+  $('riskLabel').textContent=label;
+  $('riskLabel').style.color = pct>=50?'var(--pos)':'var(--neg)';
+  const missNote = res.missing.length
+    ? ` <span style="color:var(--warn)">${res.missing.length} marker${res.missing.length>1?'s':''} missing (${res.missing.join(', ')}) — assumed average, so treat this as lower-confidence.</span>` : '';
+  $('verdict').innerHTML = `The model outputs a <b style="color:var(--text)">${pct.toFixed(1)}%</b> probability of diabetes for this panel${epoch===0?' — but it is untrained, so this is meaningless until you press Train.':'.'}${missNote}`;
+}
+$('predictBtn').onclick=showPrediction;
+$('sampleBtn').onclick=()=>{
+  const r=DATA.rawTrain[Math.floor(Math.random()*DATA.rawTrain.length)];
+  DATA.featureNames.forEach((f,j)=>$('inf_'+j).value=r[j]);
+  showPrediction();
+};
+function teach(dx){
+  const res=readInferStandardized(); if(!res){ toast('Enter at least one marker first.'); return; }
+  const x=res.x;
+  DATA.Xtr.push(x); DATA.ytr.push(dx);
+  DATA.rawTrain.push(x.map((v,j)=>v*DATA.std[j]+DATA.mean[j]));  // reconstruct raw (mean for any imputed marker)
+  const lr=+$('lr').value||0.5, l2=+$('l2').value||0;
+  for(let s=0;s<25;s++) trainStep(DATA.Xtr,DATA.ytr,lr,l2);  // a few fine-tuning steps (no dropout)
+  epoch+=25;
+  const ev=evaluate(DATA.Xte,DATA.yte); window._lastEval=ev;
+  history.push({epoch, trainLoss:ev.loss, testLoss:ev.loss, testAcc:ev.acc});
+  renderTrainStats(); renderWeights(); updateLossChart(); renderMetrics(ev);
+  showPrediction();
+  pushLog(`Fine-tuned on a <b>${dx?'diabetic':'non-diabetic'}</b> case → 25 gradient steps. New prediction: <b>${(100*predictProba(x)).toFixed(1)}%</b>.`);
+}
+$('teachNon').onclick=()=>teach(0);
+$('teachDia').onclick=()=>teach(1);
+function pushLog(html){
+  const log=$('log'); const t=new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const d=document.createElement('div'); d.className='logitem'; d.innerHTML=`<span class="tk">${t}</span><span>${html}</span>`;
+  log.prepend(d); while(log.children.length>8) log.lastChild.remove();
+}
+
+/* =====================================================================
+   PDF IMPORT — best-effort extraction, then the user CONFIRMS the values.
+   Lab reports vary wildly in layout/naming/units, so this is deliberately a
+   "fill the form, you review it" step — never auto-trusted. Scanned/image-only
+   PDFs have no text layer and are reported as such. All parsing is local.
+   ===================================================================== */
+if(window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const PDF_SYNONYMS={
+  Age:[/\bage\b/i], BMI:[/body mass index/i,/\bbmi\b/i],
+  Glucose:[/fasting glucose/i,/\bglucose\b/i],
+  Chol:[/total cholesterol/i,/\bcholesterol\b/i,/\bchol\b/i],
+  TG:[/triglycerides?/i,/\btrig\b/i,/\btg\b/i],
+  HDL:[/hdl/i], LDL:[/ldl/i],
+  Cr:[/creatinine/i,/\bcreat\b/i,/\bcr\b/i],
+  BUN:[/blood urea nitrogen/i,/\burea\b/i,/\bbun\b/i]
+};
+function parseLabText(text){
+  const found={};
+  for(const f of DATA.featureNames){
+    const pats=PDF_SYNONYMS[f]; if(!pats) continue;
+    for(const re of pats){
+      const m=re.exec(text); if(!m) continue;
+      const after=text.slice(m.index+m[0].length, m.index+m[0].length+40);   // number just after the label
+      const num=after.match(/[-+]?\d{1,4}(?:\.\d+)?/);
+      if(num){ found[f]=parseFloat(num[0]); break; }
+    }
+  }
+  return found;
+}
+async function extractPdfText(file){
+  const buf=await file.arrayBuffer();
+  const pdf=await pdfjsLib.getDocument({data:buf}).promise;
+  let text='';
+  for(let p=1;p<=pdf.numPages;p++){ const page=await pdf.getPage(p); const c=await page.getTextContent(); text+=c.items.map(it=>it.str).join(' ')+' \n'; }
+  return text;
+}
+async function importPdf(file){
+  if(!DATA){ toast('Load a dataset first so the model knows which markers to look for.'); return; }
+  if(!window.pdfjsLib){ toast('PDF library failed to load.'); return; }
+  $('pdfNote').textContent='Reading PDF…';
+  let text;
+  try{ text=await extractPdfText(file); }
+  catch(e){ $('pdfNote').textContent=''; toast('Could not read that PDF.'); return; }
+  if(!text.trim()){ $('pdfNote').innerHTML='<span style="color:var(--warn)">No text found — this looks like a scanned/image PDF. Enter values manually.</span>'; return; }
+  const found=parseLabText(text), keys=Object.keys(found);
+  DATA.featureNames.forEach((f,j)=>{ if(found[f]!=null) $('inf_'+j).value=found[f]; });
+  if(!keys.length){ $('pdfNote').innerHTML='<span style="color:var(--warn)">No recognizable markers found. Enter values manually.</span>'; return; }
+  const miss=DATA.featureNames.filter(f=>found[f]==null);
+  $('pdfNote').innerHTML=`Found <b style="color:var(--text)">${keys.length}</b>: ${keys.map(k=>k+' '+found[k]).join(', ')}.`+
+    (miss.length?` Not found: <span style="color:var(--warn)">${miss.join(', ')}</span>. Review &amp; complete, then Predict.`:' Review, then Predict.');
+  toast(`Imported ${keys.length} value(s) — confirm before predicting.`);
+}
+const pdfdrop=$('pdfdrop'), pdffile=$('pdffile');
+pdffile.onchange=e=>{const f=e.target.files[0]; if(f) importPdf(f); pdffile.value='';};
+['dragenter','dragover'].forEach(ev=>pdfdrop.addEventListener(ev,e=>{e.preventDefault();pdfdrop.classList.add('drag');}));
+['dragleave','drop'].forEach(ev=>pdfdrop.addEventListener(ev,e=>{e.preventDefault();pdfdrop.classList.remove('drag');}));
+pdfdrop.addEventListener('drop',e=>{const f=e.dataTransfer.files[0]; if(f) importPdf(f);});
+
+/* =====================================================================
+   RENDERING
+   ===================================================================== */
+function renderTrainStats(){
+  $('mEpoch').textContent = epoch;
+  const last = history[history.length-1];
+  $('mTrainLoss').textContent = last? last.trainLoss.toFixed(4) : '—';
+  $('mTestLoss').textContent  = last? last.testLoss.toFixed(4)  : '—';
+  $('mTestAcc').textContent   = last? (100*last.testAcc).toFixed(1)+'%' : '—';
+}
+function renderWeights(){
+  if(!DATA||!net){ return; }
+  const w=featureWeights(), maxAbs=Math.max(0.001,...w.map(Math.abs));
+  const order=[...w.keys()].sort((a,b)=>Math.abs(w[b])-Math.abs(w[a]));
+  $('weights').innerHTML = order.map(j=>{
+    const v=w[j], frac=Math.abs(v)/maxAbs*50, col=v>=0?'var(--pos)':'var(--neg)';
+    const left=v>=0?50:50-frac;
+    return `<div class="wrow"><span class="nm">${DATA.featureNames[j]}</span>
+      <span class="wtrack"><span class="mid"></span><span class="fill" style="left:${left}%;width:${frac}%;background:${col}"></span></span>
+      <span class="wval">${v>=0?'+':''}${v.toFixed(3)}</span></div>`;
+  }).join('');
+}
+function renderMetrics(ev){
+  if(!ev) return;
+  $('evAcc').textContent=(100*ev.acc).toFixed(1)+'%';
+  $('evAuc').textContent=ev.auc.toFixed(3);
+  $('cmTN').textContent=ev.TN; $('cmFP').textContent=ev.FP; $('cmFN').textContent=ev.FN; $('cmTP').textContent=ev.TP;
+}
+
+/* =====================================================================
+   LOSS CHART
+   ===================================================================== */
+let lossChart=null;
+const cssVar=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function resetLossChart(){
+  if(lossChart) lossChart.destroy();
+  const grid=cssVar('--border'), txt=cssVar('--muted');
+  lossChart=new Chart($('lossChart'),{
+    type:'line',
+    data:{labels:[],datasets:[
+      {label:'Train loss',data:[],borderColor:cssVar('--accent'),backgroundColor:'transparent',borderWidth:2,pointRadius:0,tension:.2,yAxisID:'y'},
+      {label:'Test loss', data:[],borderColor:cssVar('--warn'), backgroundColor:'transparent',borderWidth:2,borderDash:[5,4],pointRadius:0,tension:.2,yAxisID:'y'},
+      {label:'Test accuracy',data:[],borderColor:cssVar('--neg'),backgroundColor:'transparent',borderWidth:1.5,pointRadius:0,tension:.2,yAxisID:'y1'}
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,animation:false,interaction:{mode:'index',intersect:false},
+      scales:{
+        x:{grid:{display:false},border:{color:grid},ticks:{color:txt,maxTicksLimit:8},title:{display:true,text:'epoch',color:txt}},
+        y:{position:'left',grid:{color:grid},border:{display:false},ticks:{color:txt},title:{display:true,text:'loss (BCE)',color:txt},beginAtZero:true},
+        y1:{position:'right',grid:{display:false},border:{display:false},ticks:{color:txt,callback:v=>(v*100)+'%'},title:{display:true,text:'accuracy',color:txt},min:0,max:1}
+      },
+      plugins:{legend:{labels:{color:txt,usePointStyle:true,boxWidth:8,font:{size:11}}}}}
+  });
+}
+function updateLossChart(){
+  if(!lossChart) return;
+  // downsample to ~250 points for a smooth, light chart
+  const step=Math.max(1,Math.floor(history.length/250));
+  const pts=history.filter((_,i)=>i%step===0 || i===history.length-1);
+  lossChart.data.labels=pts.map(p=>p.epoch);
+  lossChart.data.datasets[0].data=pts.map(p=>p.trainLoss);
+  lossChart.data.datasets[1].data=pts.map(p=>p.testLoss);
+  lossChart.data.datasets[2].data=pts.map(p=>p.testAcc);
+  lossChart.update();
+}
+
+/* =====================================================================
+   BOOT
+   ===================================================================== */
+resetLossChart();
+$('ghlink').onclick=e=>{e.preventDefault();toast('Point this at your GitHub repo once you push it.');};
+// Auto-load the example dataset if it sits next to this page (e.g. on GitHub Pages).
+$('exampleBtn').click();
+</script>
+</body>
+</html>
